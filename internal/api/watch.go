@@ -16,9 +16,43 @@ type WatchData struct {
 }
 
 type WatchAttributes struct {
-	Name      string          `json:"movie_title"`
-	Sources   [][]WatchSource `json:"multiSRC"`
-	Subtitles []WatchSubtitle `json:"tracks"`
+	Name          string          `json:"movie_title"`
+	PreTitle      string          `json:"pre_title"`
+	MovieName     string          `json:"movie_name"`
+	Poster        string          `json:"poster"`
+	Sources       [][]WatchSource `json:"multiSRC"`
+	Subtitles     []WatchSubtitle `json:"tracks"`
+	SeasonNumber  int             `json:"seasonNumber"`
+	EpisodeNumber int             `json:"episodeNumber"`
+	Cover         string          `json:"cover"`
+	Thumb         string          `json:"thumb"`
+	SeriesData    []SeriesSeason  `json:"seriesData"`
+	Thumbs        *WatchThumbs    `json:"thumbs"`
+}
+
+// WatchThumbs is Filimo's per-video seek sprite (unique per episode).
+type WatchThumbs struct {
+	Src      string `json:"src"`
+	WebpTSrc string `json:"webp_t_src"`
+	WebpMSrc string `json:"webp_m_src"`
+}
+
+type SeriesSeason struct {
+	Title    string          `json:"title"`
+	Playing  bool            `json:"playing"`
+	Image    string          `json:"image"`
+	Cover    string          `json:"cover"`
+	Thumb    string          `json:"thumb"`
+	Episodes []SeriesEpisode `json:"episode"`
+}
+
+type SeriesEpisode struct {
+	Title       string `json:"title"`
+	UID         string `json:"uid"`
+	Image       string `json:"image"`
+	Thumbplay   string `json:"thumbplay"`
+	Duration    string `json:"duration"`
+	Description string `json:"description"`
 }
 
 type WatchSource struct {
@@ -32,14 +66,9 @@ type WatchSubtitle struct {
 }
 
 func GetWatch(client helper.HttpClient, id string) Watch {
-	var watch Watch
-	response, err := client.Get(fmt.Sprintf("https://api.filimo.com/api/fa/v1/movie/watch/watch/uid/%s", id))
+	watch, err := GetEpisodeWatch(client, id)
 	if err != nil {
-		helper.ShowErrorAndExit(fmt.Sprintf("Failed to get watch info for ID %s: %v", id, err))
-	}
-	err = json.Unmarshal([]byte(response), &watch)
-	if err != nil {
-		helper.ShowErrorAndExit(fmt.Sprintf("Failed to parse watch info: %v", err))
+		helper.ShowErrorAndExit(err.Error())
 	}
 	return watch
 }

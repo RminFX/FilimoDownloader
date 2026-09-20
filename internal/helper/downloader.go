@@ -108,6 +108,9 @@ func downloadAttempt(url string, filepath string, token string) error {
 	}
 
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
+		if resp.StatusCode == 403 {
+			return fmt.Errorf("HTTP 403 (دسترسی رد شد — معمولاً لینک/کلید منقضی یا بدون امضا)")
+		}
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 

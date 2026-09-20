@@ -15,14 +15,26 @@ type Playlist struct {
 }
 
 func GetPlaylist(client helper.HttpClient, link string) Playlist {
+	playlist, err := GetPlaylistErr(client, link)
+	if err != nil {
+		helper.ShowErrorAndExit(err.Error())
+	}
+	return playlist
+}
+
+func GetPlaylistErr(client helper.HttpClient, link string) (Playlist, error) {
 	playlist, err := client.Get(link)
 	if err != nil {
-		helper.ShowErrorAndExit(fmt.Sprintf("Failed to get playlist: %v", err))
+		return Playlist{}, fmt.Errorf("خواندن لیست قطعه‌ها ممکن نشد: %w", err)
+	}
+	urls, err := extractUrls(playlist, link)
+	if err != nil {
+		return Playlist{}, err
 	}
 	return Playlist{
 		Content: cleanContent(playlist),
-		Urls:    extractUrls(playlist, link),
-	}
+		Urls:    urls,
+	}, nil
 }
 
 func cleanContent(playlist string) string {
@@ -30,20 +42,17 @@ func cleanContent(playlist string) string {
 	return regexp.MustCompile(pattern).ReplaceAllString(playlist, "")
 }
 
-func extractUrls(playlist string, link string) []*url.URL {
+func extractUrls(playlist string, link string) ([]*url.URL, error) {
 	urls := []*url.URL{}
 
-	// FIX: check key existence before using it
 	keyPattern := regexp.MustCompile(`#EXT-X-KEY[^\n]*URI="([^"]*)"`)
 	keyMatches := keyPattern.FindStringSubmatch(playlist)
 
 	if len(keyMatches) < 2 || keyMatches[1] == "" {
-		helper.ShowErrorAndExit("Playlist encryption key not found")
+		return nil, fmt.Errorf("کلید رمز قطعه پیدا نشد")
 	}
-	key := keyMatches[1]
-	urls = append(urls, helper.AbsoluteUrl(link, key))
+	urls = append(urls, helper.AbsoluteUrl(link, keyMatches[1]))
 
-	// Extract chunk URLs (non-comment lines)
 	chunksPattern := regexp.MustCompile(`(?m)^([^#\s].*)`)
 	for _, chunk := range chunksPattern.FindAllString(playlist, -1) {
 		chunk = strings.TrimSpace(chunk)
@@ -54,8 +63,8 @@ func extractUrls(playlist string, link string) []*url.URL {
 	}
 
 	if len(urls) <= 1 {
-		helper.ShowErrorAndExit("Playlist has no media chunks")
+		return nil, fmt.Errorf("قطعه‌ای برای دانلود پیدا نشد")
 	}
 
-	return urls
+	return urls, nil
 }

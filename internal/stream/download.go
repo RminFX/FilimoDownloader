@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -14,15 +15,14 @@ import (
 
 func DownloadDir(name string) string {
 	absDir, _ := filepath.Abs("Downloads")
-	absPath, err := filepath.Abs(name)
-	if err != nil {
-		panic(err)
+	return DownloadDirIn(absDir, name)
+}
+
+func DownloadDirIn(root, name string) string {
+	if filepath.IsAbs(name) {
+		return name
 	}
-	rel, _ := filepath.Rel(absDir, absPath)
-	if !strings.HasPrefix(rel, "..") {
-		return absPath
-	}
-	return path.Join(absDir, name)
+	return filepath.Join(root, helper.SanitizeFilename(name))
 }
 
 func SubtitleDir(base string) string { return path.Join(base, "subtitle") }
@@ -95,27 +95,64 @@ func convertWebVTTToSRT(webvtt string) string {
 
 func DownloadVideo(client helper.HttpClient, variant HlsVideoVariant, base string) {
 	dir := path.Join(VideoDir(base), variant.Quality)
-	downloadSegments(client, variant.Link, dir)
+	if err := DownloadSegments(context.Background(), client, variant.Link, dir, nil); err != nil {
+		helper.ShowErrorAndExit(err.Error())
+	}
 }
 
 func DownloadAudio(client helper.HttpClient, track HlsAudioTrack, base string) {
 	dir := path.Join(AudioDir(base), track.Language)
-	downloadSegments(client, track.Link, dir)
+	if err := DownloadSegments(context.Background(), client, track.Link, dir, nil); err != nil {
+		helper.ShowErrorAndExit(err.Error())
+	}
 }
 
-// downloadSegments - نمایش شماره chunk درجا + skip اگه قبلاً دانلود شده
-func downloadSegments(client helper.HttpClient, link string, dir string) {
-	playlist := GetPlaylist(client, link)
+type SegmentProgress func(done, total int)
+
+func DownloadSegments(ctx context.Context, client helper.HttpClient, link string, dir string, progress SegmentProgress) error {
+	playlist, err := GetPlaylistErr(client, link)
+	if err != nil {
+		return err
+	}
 	helper.WriteFile(PlaylistFile(dir), playlist.Content)
 
 	total := len(playlist.Urls)
 	fmt.Printf("  Downloading %d segments...\n", total)
 
+	lastPct := -1
+	report := func(done int, force bool) {
+		if progress == nil || total < 1 {
+			return
+		}
+		pct := done * 100 / total
+		if !force && done < total && pct == lastPct {
+			return
+		}
+		lastPct = pct
+		progress(done, total)
+	}
+
 	for idx, chunkUrl := range playlist.Urls {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
 		chunkPath := path.Join(dir, path.Base(chunkUrl.Path))
 		if helper.IsFileExists(chunkPath) {
-			fmt.Printf("\r  [%d/%d] Already exists, skipping...     ", idx+1, total)
-			continue
+			minBytes := int64(1024)
+			// AES-128 key is typically 16 bytes — never treat it as a corrupt partial.
+			if strings.HasSuffix(strings.ToLower(chunkPath), "enc.key") {
+				minBytes = 16
+			}
+			if info, err := os.Stat(chunkPath); err == nil && info.Size() >= minBytes {
+				report(idx+1, false)
+				continue
+			}
+			// فایل ناقص/خراب از تلاش قبلی — دوباره بگیر
+			_ = os.Remove(chunkPath)
 		}
 		fmt.Printf("\r  [%d/%d] Downloading segment...            ", idx+1, total)
 		err := client.DownloadFile(chunkUrl.String(), chunkPath)
@@ -123,11 +160,39 @@ func downloadSegments(client helper.HttpClient, link string, dir string) {
 			fmt.Printf("\n  Segment %d failed, retrying...\n", idx+1)
 			err2 := client.DownloadFile(chunkUrl.String(), chunkPath)
 			if err2 != nil {
-				helper.ShowErrorAndExit(fmt.Sprintf("Segment %d/%d failed: %v", idx+1, total, err2))
+				return fmt.Errorf("قطعه %d از %d دانلود نشد: %w", idx+1, total, err2)
 			}
 		}
+		report(idx+1, true)
 	}
+	report(total, true)
 	fmt.Printf("\r  [%d/%d] All segments downloaded.          \n", total, total)
+	return nil
+}
+
+func OptionDirs(base string, isPlaylist bool) []string {
+	if !helper.IsFileExists(base) {
+		return nil
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dirPath := path.Join(base, entry.Name())
+		checkFile := PlaylistFile(dirPath)
+		if !isPlaylist {
+			checkFile = SrtFile(dirPath)
+		}
+		if helper.IsFileExists(checkFile) {
+			dirs = append(dirs, dirPath)
+		}
+	}
+	return dirs
 }
 
 // CleanupMediaDirs حذف پوشه‌های video و audio بعد از build

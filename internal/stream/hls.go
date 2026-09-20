@@ -26,18 +26,30 @@ type HlsAudioTrack struct {
 }
 
 func GetHls(client helper.HttpClient, watch api.Watch) Hls {
+	hls, err := GetHlsErr(client, watch)
+	if err != nil {
+		helper.ShowErrorAndExit(err.Error())
+	}
+	return hls
+}
+
+func GetHlsErr(client helper.HttpClient, watch api.Watch) (Hls, error) {
 	l := extractHlsLink(watch)
 	if l == "" {
-		helper.ShowErrorAndExit("HLS link not found in watch data")
+		return Hls{}, fmt.Errorf("لینک پخش پیدا نشد")
 	}
 	hlsContent, err := client.Get(l)
 	if err != nil {
-		helper.ShowErrorAndExit(fmt.Sprintf("Failed to get HLS playlist: %v", err))
+		return Hls{}, fmt.Errorf("خواندن کیفیت‌ها ممکن نشد: %w", err)
+	}
+	variants, err := parseVariants(hlsContent)
+	if err != nil {
+		return Hls{}, err
 	}
 	return Hls{
-		Variants: parseVariants(hlsContent),
+		Variants: variants,
 		Tracks:   parseTracks(hlsContent),
-	}
+	}, nil
 }
 
 func extractHlsLink(watch api.Watch) string {
@@ -52,7 +64,7 @@ func extractHlsLink(watch api.Watch) string {
 }
 
 // parseVariants - FIX: more robust regex that handles various M3U8 formats
-func parseVariants(hls string) []HlsVideoVariant {
+func parseVariants(hls string) ([]HlsVideoVariant, error) {
 	list := []HlsVideoVariant{}
 
 	lines := strings.Split(hls, "\n")
@@ -112,9 +124,9 @@ func parseVariants(hls string) []HlsVideoVariant {
 	}
 
 	if len(list) == 0 {
-		helper.ShowErrorAndExit("No video variants found in HLS playlist")
+		return nil, fmt.Errorf("هیچ کیفیتی در پخش پیدا نشد")
 	}
-	return list
+	return list, nil
 }
 
 // parseTracks - FIX: more robust regex for audio tracks

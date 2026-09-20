@@ -1,0 +1,22 @@
+# OS / junk
+.DS_Store
+**/.DS_Store
+.tmp_thumbs/
+*.log
+
+# Built binaries / app bundles (rebuild on new machine)
+/FilimoDownloader
+/desktop/build/bin/
+/desktop/frontend/dist/
+/desktop/frontend/node_modules/
+
+# Local runtime / secrets — NEVER commit (live on SSD 03-secrets + 04-app-data)
+/data/ProfileDoc
+/data/config.json
+/data/queue.json
+/data/download_history.json
+.env
+.env.*
+*.pem
+*.key
+!*.key.example
